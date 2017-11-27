@@ -1,7 +1,10 @@
 ﻿using System;
 using System.IO;
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 
 namespace EchoServer
 {
@@ -16,30 +19,109 @@ namespace EchoServer
 
         public void Start()
         {
+            bool clientCertificateRequired = false;
+            bool checkCertificateRevocation = true;
+            SslProtocols enabledSSLProtocols = SslProtocols.Tls;
+
+            string serverCertificateFile = "M:/cert/ServerSSL.pfx";
+            X509Certificate serverCertificate = new X509Certificate2(serverCertificateFile, "mysecret");
+
+
             TcpListener serverSocket = new TcpListener(IPAddress.Loopback, PORT);
             serverSocket.Start();
             Console.WriteLine("Server started");
 
+            bool leaveInnerStreamOpen = false;
             using (TcpClient connectionSocket = serverSocket.AcceptTcpClient())
-            using (Stream ns = connectionSocket.GetStream())
-            using (StreamReader sr = new StreamReader(ns))
-            using (StreamWriter sw = new StreamWriter(ns))
+            using (Stream unsecureStream = connectionSocket.GetStream())
+            using (SslStream sslStream = new SslStream(unsecureStream, leaveInnerStreamOpen))
             {
-                Console.WriteLine("Server activated");
-                sw.AutoFlush = true; // enable automatic flushing
+                sslStream.AuthenticateAsServer(serverCertificate, clientCertificateRequired,
+                    enabledSSLProtocols, checkCertificateRevocation);
+                //sslStream.AuthenticateAsServer(serverCertificate);
 
-                string message = sr.ReadLine(); // read string from client
-                string answer = "";
-                while (!string.IsNullOrEmpty(message))
+
+                // forskellige inf. om SSL udskrevet
+                DisplaySecurityLevel(sslStream);
+                DisplaySecurityServices(sslStream);
+                DisplayCertificateInformation(sslStream);
+                DisplayStreamProperties(sslStream);
+
+
+                using (StreamReader sr = new StreamReader(sslStream))
+                using (StreamWriter sw = new StreamWriter(sslStream))
                 {
+                    Console.WriteLine("Server activated");
+                    sw.AutoFlush = true; // enable automatic flushing
 
-                    Console.WriteLine("Client: " + message);
-                    answer = message.ToUpper(); // convert string to upper case
-                    sw.WriteLine(answer); // send back upper case string
-                    message = sr.ReadLine();
+                    string message = sr.ReadLine(); // read string from client
+                    string answer = "";
+                    while (!string.IsNullOrEmpty(message))
+                    {
 
+                        Console.WriteLine("Client: " + message);
+                        answer = message.ToUpper(); // convert string to upper case
+                        sw.WriteLine(answer); // send back upper case string
+                        message = sr.ReadLine();
+
+                    }
                 }
             }
+        }
+
+         void DisplaySecurityLevel(SslStream stream)
+        {
+            Console.WriteLine("Cipher: {0} strength {1}", stream.CipherAlgorithm, stream.CipherStrength);
+            Console.WriteLine("Hash: {0} strength {1}", stream.HashAlgorithm, stream.HashStrength);
+            Console.WriteLine("Key exchange: {0} strength {1}", stream.KeyExchangeAlgorithm, stream.KeyExchangeStrength);
+            Console.WriteLine("Protocol: {0}", stream.SslProtocol);
+        }
+         void DisplaySecurityServices(SslStream stream)
+        {
+            Console.WriteLine("Is authenticated: {0} as server? {1}", stream.IsAuthenticated, stream.IsServer);
+            Console.WriteLine("IsSigned: {0}", stream.IsSigned);
+            Console.WriteLine("Is Encrypted: {0}", stream.IsEncrypted);
+        }
+         void DisplayStreamProperties(SslStream stream)
+        {
+            Console.WriteLine("Can read: {0}, write {1}", stream.CanRead, stream.CanWrite);
+            Console.WriteLine("Can timeout: {0}", stream.CanTimeout);
+        }
+         void DisplayCertificateInformation(SslStream stream)
+        {
+            Console.WriteLine("Certificate revocation list checked: {0}", stream.CheckCertRevocationStatus);
+
+            X509Certificate localCertificate = stream.LocalCertificate;
+            if (stream.LocalCertificate != null)
+            {
+                Console.WriteLine("Local cert was issued to {0} and is valid from {1} until {2}.",
+                    localCertificate.Subject,
+                    localCertificate.GetEffectiveDateString(),
+                    localCertificate.GetExpirationDateString());
+            }
+            else
+            {
+                Console.WriteLine("Local certificate is null.");
+            }
+            // Display the properties of the client's certificate.
+            X509Certificate remoteCertificate = stream.RemoteCertificate;
+            if (stream.RemoteCertificate != null)
+            {
+                Console.WriteLine("Remote cert was issued to {0} and is valid from {1} until {2}.",
+                    remoteCertificate.Subject,
+                    remoteCertificate.GetEffectiveDateString(),
+                    remoteCertificate.GetExpirationDateString());
+            }
+            else
+            {
+                Console.WriteLine("Remote certificate is null.");
+            }
+        }
+        private  void DisplayUsage()
+        {
+            Console.WriteLine("To start the server specify:");
+            Console.WriteLine("serverSync certificateFile.cer");
+            Environment.Exit(1);
         }
     }
 }
